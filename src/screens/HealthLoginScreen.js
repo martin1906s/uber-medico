@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,17 +7,19 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { useAppContext, ROLE_TYPES } from '../context/AppContext';
 import { gradients, palette } from '../theme/colors';
 import { useDimensions } from '../hooks/useDimensions';
 
 export const HealthLoginScreen = () => {
   const navigation = useNavigation();
+  const route = useRoute();
   const { login, providers } = useAppContext();
   const { width, isSmallDevice } = useDimensions();
   const dynamicStyles = getDynamicStyles(width, isSmallDevice);
@@ -27,6 +29,19 @@ export const HealthLoginScreen = () => {
   });
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showMessage, setShowMessage] = useState(false);
+  const [messageText, setMessageText] = useState('');
+
+  useEffect(() => {
+    if (route.params?.showMessage && route.params?.message) {
+      setMessageText(route.params.message);
+      setShowMessage(true);
+      // Ocultar el mensaje después de 5 segundos
+      setTimeout(() => {
+        setShowMessage(false);
+      }, 5000);
+    }
+  }, [route.params]);
 
   const handleLogin = () => {
     if (!form.email || !form.password) {
@@ -81,6 +96,28 @@ export const HealthLoginScreen = () => {
   return (
     <LinearGradient colors={gradients.aurora} style={{ flex: 1 }}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <Modal
+          visible={showMessage}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowMessage(false)}
+        >
+          <View style={styles.messageOverlay}>
+            <View style={styles.messageContainer}>
+              <View style={styles.messageHeader}>
+                <Ionicons name="checkmark-circle" size={32} color={palette.lime} />
+                <Text style={styles.messageTitle}>Registro enviado</Text>
+              </View>
+              <Text style={styles.messageText}>{messageText}</Text>
+              <TouchableOpacity
+                style={styles.messageButton}
+                onPress={() => setShowMessage(false)}
+              >
+                <Text style={styles.messageButtonText}>Entendido</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
         <ScrollView
           contentContainerStyle={[styles.scrollContent, dynamicStyles.scrollContent]}
           showsVerticalScrollIndicator={false}
@@ -367,6 +404,50 @@ const styles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.6,
+  },
+  messageOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  messageContainer: {
+    backgroundColor: palette.graphite,
+    borderRadius: 24,
+    padding: 24,
+    maxWidth: 400,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.3)',
+  },
+  messageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  messageTitle: {
+    color: palette.frost,
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  messageText: {
+    color: palette.slate,
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  messageButton: {
+    backgroundColor: palette.neon,
+    borderRadius: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  messageButtonText: {
+    color: palette.jet,
+    fontWeight: '700',
+    fontSize: 16,
   },
 });
 
