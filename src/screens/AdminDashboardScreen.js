@@ -1,18 +1,20 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Modal, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Modal, Image, Linking, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system';
+import * as WebBrowser from 'expo-web-browser';
 import { useAppContext } from '../context/AppContext';
 import { palette } from '../theme/colors';
 import { useDimensions } from '../hooks/useDimensions';
 
 export const AdminDashboardScreen = () => {
   const { providers, appointments, setProviders } = useAppContext();
+  const { width, isSmallDevice } = useDimensions();
+  const dynamicStyles = getDynamicStyles(width, isSmallDevice);
   const [selectedProvider, setSelectedProvider] = useState(null);
   const [documentModalVisible, setDocumentModalVisible] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState(null);
-  const { width, isSmallDevice } = useDimensions();
-  const dynamicStyles = getDynamicStyles(width, isSmallDevice);
   const pending = providers.filter((p) => p.verificationStatus === 'pendiente');
   const confirmedAppointments = appointments.filter((appt) => appt.status === 'confirmada');
 
@@ -40,13 +42,86 @@ export const AdminDashboardScreen = () => {
     setSelectedProvider(provider);
   };
 
-  const handleViewDocument = (document, documentName) => {
+  const handleViewDocument = async (document, documentName) => {
     if (!document || (!document.uri && !document.uploaded)) {
       Alert.alert('Documento no disponible', 'Este documento no ha sido cargado aún.');
       return;
     }
-    setSelectedDocument({ document, name: documentName });
-    setDocumentModalVisible(true);
+    
+    const doc = document;
+    const isImage = doc.mimeType?.includes('image') || 
+                    doc.name?.match(/\.(jpg|jpeg|png|gif|webp)$/i) ||
+                    doc.uri?.match(/\.(jpg|jpeg|png|gif|webp)$/i);
+    
+    // Para imágenes, mostrar en modal
+    if (isImage) {
+      setSelectedDocument({ document, name: documentName });
+      setDocumentModalVisible(true);
+      return;
+    }
+    
+    // Para PDFs, abrir directamente en el navegador o visor nativo
+    if (doc.uri && doc.uri !== 'simulated') {
+      try {
+        let pdfUrl = null;
+        
+        // Si es un archivo local
+        if (doc.uri.startsWith('file://') || doc.uri.startsWith('content://')) {
+          // Para archivos locales, intentar abrir con el visor nativo
+          try {
+            const canOpen = await Linking.canOpenURL(doc.uri);
+            if (canOpen) {
+              await Linking.openURL(doc.uri);
+              return;
+            } else {
+              // Si no se puede abrir directamente, intentar leer y mostrar info
+              Alert.alert(
+                'PDF local',
+                `Archivo: ${doc.name || 'Documento PDF'}\n\nPara ver este PDF, por favor ábrelo desde tu gestor de archivos.`,
+                [{ text: 'OK' }]
+              );
+              return;
+            }
+          } catch (linkError) {
+            console.error('Error opening local PDF:', linkError);
+            Alert.alert(
+              'PDF no disponible',
+              'No se pudo abrir el PDF. Por favor, intenta abrirlo desde tu dispositivo.',
+              [{ text: 'OK' }]
+            );
+            return;
+          }
+        } else if (doc.uri.startsWith('http://') || doc.uri.startsWith('https://')) {
+          // Para URLs, usar Google Docs Viewer
+          pdfUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(doc.uri)}&embedded=true`;
+        } else {
+          pdfUrl = doc.uri;
+        }
+        
+        // Abrir PDF en navegador in-app usando expo-web-browser
+        if (pdfUrl) {
+          try {
+            await WebBrowser.openBrowserAsync(pdfUrl, {
+              presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
+              controlsColor: palette.neon,
+            });
+          } catch (browserError) {
+            console.error('Error opening browser:', browserError);
+            // Fallback a Linking
+            try {
+              await Linking.openURL(pdfUrl);
+            } catch (linkError) {
+              Alert.alert('Error', 'No se pudo abrir el PDF.');
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error preparing PDF:', error);
+        Alert.alert('Error', 'No se pudo abrir el PDF.');
+      }
+    } else {
+      Alert.alert('Documento simulado', 'Este es un documento de prueba. En producción se abriría el archivo real.');
+    }
   };
 
   const handleVerifyProvider = (provider) => {
@@ -58,12 +133,23 @@ export const AdminDashboardScreen = () => {
         {
           text: 'Validar',
           onPress: () => {
+            // Cerrar el modal primero para que se vea el cambio inmediatamente
+            setSelectedProvider(null);
+            
+            // Actualizar el estado
             const updatedProviders = providers.map((p) =>
               p.id === provider.id ? { ...p, verificationStatus: 'verificado' } : p,
             );
             setProviders(updatedProviders);
-            setSelectedProvider(null);
-            Alert.alert('Validado', `${provider.name} ha sido verificado exitosamente.`);
+            
+            // Mostrar feedback después de un pequeño delay para que se vea el cambio
+            setTimeout(() => {
+              Alert.alert(
+                '✅ Validado',
+                `${provider.name} ha sido verificado exitosamente.`,
+                [{ text: 'OK' }]
+              );
+            }, 300);
           },
         },
       ],
@@ -284,12 +370,23 @@ export const AdminDashboardScreen = () => {
                               text: 'Rechazar',
                               style: 'destructive',
                               onPress: () => {
+                                // Cerrar el modal primero para que se vea el cambio inmediatamente
+                                setSelectedProvider(null);
+                                
+                                // Actualizar el estado
                                 const updatedProviders = providers.map((p) =>
                                   p.id === selectedProvider.id ? { ...p, verificationStatus: 'rechazado' } : p,
                                 );
                                 setProviders(updatedProviders);
-                                setSelectedProvider(null);
-                                Alert.alert('Solicitud rechazada', 'La solicitud ha sido rechazada.');
+                                
+                                // Mostrar feedback después de un pequeño delay para que se vea el cambio
+                                setTimeout(() => {
+                                  Alert.alert(
+                                    '❌ Solicitud rechazada',
+                                    'La solicitud ha sido rechazada.',
+                                    [{ text: 'OK' }]
+                                  );
+                                }, 300);
                               },
                             },
                           ],
@@ -330,39 +427,38 @@ export const AdminDashboardScreen = () => {
               </TouchableOpacity>
             </View>
             {selectedDocument?.document?.uri && selectedDocument.document.uri !== 'simulated' ? (
-              <ScrollView style={styles.documentViewer} contentContainerStyle={styles.documentViewerContent}>
-                {(() => {
-                  const doc = selectedDocument.document;
-                  const isImage = doc.mimeType?.includes('image') || 
-                                  doc.name?.match(/\.(jpg|jpeg|png|gif|webp)$/i) ||
-                                  doc.uri?.match(/\.(jpg|jpeg|png|gif|webp)$/i);
-                  
-                  if (isImage) {
-                    return (
+              (() => {
+                const doc = selectedDocument.document;
+                const isImage = doc.mimeType?.includes('image') || 
+                                doc.name?.match(/\.(jpg|jpeg|png|gif|webp)$/i) ||
+                                doc.uri?.match(/\.(jpg|jpeg|png|gif|webp)$/i);
+                
+                // Solo mostrar imágenes en el modal, los PDFs se abren directamente
+                if (isImage) {
+                  return (
+                    <ScrollView style={styles.documentViewer} contentContainerStyle={styles.documentViewerContent}>
                       <Image
                         source={{ uri: doc.uri }}
                         style={styles.documentImage}
                         resizeMode="contain"
                       />
-                    );
-                  } else {
-                    return (
-                      <View style={styles.documentPlaceholder}>
-                        <Ionicons name="document-text" size={64} color={palette.neon} />
-                        <Text style={styles.documentPlaceholderText}>
-                          {doc.name || 'Documento PDF'}
-                        </Text>
-                        <Text style={styles.documentPlaceholderSubtext}>
-                          {doc.size ? `Tamaño: ${(doc.size / 1024).toFixed(2)} KB` : 'Documento cargado'}
-                        </Text>
-                        <Text style={styles.documentPlaceholderSubtext}>
-                          {doc.mimeType || 'Tipo: PDF'}
-                        </Text>
-                      </View>
-                    );
-                  }
-                })()}
-              </ScrollView>
+                    </ScrollView>
+                  );
+                } else {
+                  // No debería llegar aquí para PDFs, pero por si acaso
+                  return (
+                    <View style={styles.documentPlaceholder}>
+                      <Ionicons name="document-text" size={64} color={palette.neon} />
+                      <Text style={styles.documentPlaceholderText}>
+                        {doc.name || 'Documento PDF'}
+                      </Text>
+                      <Text style={styles.documentPlaceholderSubtext}>
+                        Los PDFs se abren en el navegador o visor nativo del dispositivo.
+                      </Text>
+                    </View>
+                  );
+                }
+              })()
             ) : (
               <View style={styles.documentPlaceholder}>
                 <Ionicons name="document-outline" size={64} color={palette.slate} />
@@ -835,6 +931,26 @@ const styles = StyleSheet.create({
     color: palette.slate,
     fontSize: 14,
     textAlign: 'center',
+  },
+  pdfViewerContainer: {
+    flex: 1,
+    backgroundColor: palette.graphite,
+  },
+  pdfWebView: {
+    flex: 1,
+    backgroundColor: palette.graphite,
+  },
+  pdfLoadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: palette.graphite,
+    gap: 12,
+  },
+  pdfLoadingText: {
+    color: palette.frost,
+    fontSize: 16,
+    fontWeight: '500',
   },
 });
 
